@@ -8,7 +8,7 @@ async function loadProfessorGrades(course) {
   document.getElementById('prof-course-title').textContent =
     `${course.course_code}: ${course.course_title}`;
 
-  const res = await fetch(`/api/courses/${course.course_id}/students`);
+  const res = await apiFetch(`/api/courses/${encodeURIComponent(course.course_id)}/students`);
   profStudents = await res.json();
 
   if (profStudents.length === 0) {
@@ -35,8 +35,8 @@ async function renderProfessorGrades() {
   document.getElementById('prev-student').disabled = profCurrentIndex === 0;
   document.getElementById('next-student').disabled = profCurrentIndex === profStudents.length - 1;
 
-  const res = await fetch(
-    `/api/students/${student.uid}/courses/${profCurrentCourse.course_id}/grades`
+  const res = await apiFetch(
+    `/api/students/${encodeURIComponent(student.uid)}/courses/${encodeURIComponent(profCurrentCourse.course_id)}/grades`
   );
   const grades = await res.json();
 
@@ -45,16 +45,26 @@ async function renderProfessorGrades() {
 
   let totalScore = 0;
 
-  // TODO: Data from the server should be safe to render in the page
   for (const g of grades) {
+    const gradeId = Number(g.grade_id);
+    const score = Number(g.score);
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${g.assignment_name}</td>
-      <td><input type="number" name="grade_${g.grade_id}" value="${g.score}" min="0" max="100" class="grade-input"></td>
-      <td>100</td>
-    `;
+    const nameTd = document.createElement('td');
+    nameTd.textContent = g.assignment_name;
+    const scoreTd = document.createElement('td');
+    const scoreInput = document.createElement('input');
+    scoreInput.type = 'number';
+    scoreInput.name = `grade_${gradeId}`;
+    scoreInput.value = score;
+    scoreInput.min = '0';
+    scoreInput.max = '100';
+    scoreInput.className = 'grade-input';
+    scoreTd.appendChild(scoreInput);
+    const outOfTd = document.createElement('td');
+    outOfTd.textContent = '100';
+    tr.append(nameTd, scoreTd, outOfTd);
     tbody.appendChild(tr);
-    totalScore += g.score;
+    totalScore += score;
   }
 
   const finalGrade = grades.length > 0 ? (totalScore / grades.length).toFixed(1) : '0.0';
@@ -123,11 +133,11 @@ document.getElementById('prof-grades-form').addEventListener('submit', async (e)
     });
   }
 
-  await fetch('/api/grades', {
+  const res = await apiFetch('/api/grades', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ grades })
   });
 
-  document.getElementById('prof-save-status').textContent = 'Grades saved!';
+  document.getElementById('prof-save-status').textContent = res.ok ? 'Grades saved!' : 'Save failed.';
 });

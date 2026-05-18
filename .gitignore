@@ -6,3 +6,5 @@ package-lock.json
 *.db-shm
 *.db-wal
 .claude
+certs/
+*.pem

@@ -34,8 +34,7 @@
         <label for="uid">UCLA UID</label>
         <input type="text" id="uid" placeholder="UID or username" required>
         <label for="password">Password</label>
-        <!-- TODO: The password should not be visible as the user types -->
-        <input type="text" id="password" placeholder="Password" required>
+        <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
         <button type="submit">Log In</button>
         <p id="login-error" class="error hidden"></p>
       </form>

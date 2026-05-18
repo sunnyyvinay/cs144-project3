@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const bcrypt = require('bcrypt');
 
 const db = new Database(path.join(__dirname, 'canvas.db'));
 db.pragma('journal_mode = WAL');
@@ -68,12 +69,12 @@ db.exec(`
 `);
 
 const seed = db.transaction(() => {
-  // TODO: If an attacker gained access to the database, they should not be able to read passwords
   const insertLogin = db.prepare('INSERT INTO login (uid, name, password, role) VALUES (?, ?, ?, ?)');
-  insertLogin.run('123456789', 'Alice Johnson', 'alice123', 'student');
-  insertLogin.run('987654321', 'Bob Smith', 'bob456', 'student');
-  insertLogin.run('555123456', 'Charlie Davis', 'charlie789', 'student');
-  insertLogin.run('profrosario', 'Rosario', 'bruin', 'professor');
+  const hash = (p) => bcrypt.hashSync(p, 12);
+  insertLogin.run('123456789', 'Alice Johnson', hash('alice123'), 'student');
+  insertLogin.run('987654321', 'Bob Smith', hash('bob456'), 'student');
+  insertLogin.run('555123456', 'Charlie Davis', hash('charlie789'), 'student');
+  insertLogin.run('profrosario', 'Rosario', hash('bruin'), 'professor');
 
   const insertCourse = db.prepare('INSERT INTO course (code, title, instructor, professor_uid) VALUES (?, ?, ?, ?)');
   insertCourse.run('COM SCI 35L', 'Software Construction', 'Deuerschmidt', null);

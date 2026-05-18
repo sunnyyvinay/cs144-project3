@@ -5,7 +5,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const errorEl = document.getElementById('login-error');
   errorEl.classList.add('hidden');
 
-  const res = await fetch('/api/login', {
+  const res = await apiFetch('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ uid, password }),
@@ -18,6 +18,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   }
 
   currentStudent = await res.json();
+  document.getElementById('password').value = '';
   if (currentStudent.role === 'professor') {
     loadProfessorDashboard();
   } else {

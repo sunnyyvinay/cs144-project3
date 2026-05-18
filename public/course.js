@@ -32,8 +32,15 @@ async function loadCourse(course) {
   showScreen('course-screen');
 }
 
+function safeUrl(url) {
+  // Reject anything that isn't a relative path, http(s), or the placeholder "#".
+  const s = String(url || '#').trim();
+  if (s === '#' || s.startsWith('/') || s.startsWith('https://') || s.startsWith('http://')) return s;
+  return '#';
+}
+
 async function loadModules(course) {
-  const res = await fetch(`/api/courses/${course.course_id}/content`);
+  const res = await apiFetch(`/api/courses/${encodeURIComponent(course.course_id)}/content`);
   const rows = await res.json();
 
   const weeks = [];
@@ -86,22 +93,26 @@ async function loadModules(course) {
     section.id = `week-${wk.id}`;
 
     const sorted = wk.entries.sort((a, b) => a.sort - b.sort);
-    // TODO: Data from the server should be safe to render in the page
     let entriesHtml = '';
     for (const entry of sorted) {
       const icon = entry.type === 'slides' ? SLIDES_ICON : RECORDING_ICON;
       const iconClass = entry.type === 'slides' ? 'icon-slides' : 'icon-recording';
       entriesHtml += `
-        <a href="${entry.url}" class="material-link">
+        <a href="${escapeHtml(safeUrl(entry.url))}" class="material-link">
           <span class="material-icon ${iconClass}">${icon}</span>
-          <span>${entry.title}</span>
+          <span>${escapeHtml(entry.title)}</span>
         </a>
       `;
     }
 
     const header = document.createElement('div');
     header.className = 'module-header';
-    header.innerHTML = `<h3>${wk.title}</h3><span class="module-toggle">&#9660;</span>`;
+    const h3 = document.createElement('h3');
+    h3.textContent = wk.title;
+    const toggle = document.createElement('span');
+    toggle.className = 'module-toggle';
+    toggle.innerHTML = '&#9660;';
+    header.append(h3, toggle);
     header.addEventListener('click', () => toggleModule(header));
 
     const body = document.createElement('div');

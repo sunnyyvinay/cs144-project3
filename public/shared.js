@@ -6,10 +6,27 @@ function showScreen(id) {
   document.body.className = id === 'hacked-screen' ? 'hacked-body' : '';
 }
 
-function logout() {
+// Escape any string before interpolating it into innerHTML. Used wherever
+// server data still has to flow through an HTML template (e.g. table rows
+// built with string concatenation). The same fetch wrapper attaches cookies
+// so JWT auth survives across requests.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function apiFetch(url, options = {}) {
+  return fetch(url, { credentials: 'same-origin', ...options });
+}
+
+async function logout() {
+  try { await apiFetch('/api/logout', { method: 'POST' }); } catch {}
   currentStudent = null;
-  document.getElementById('uid').value = '';
-  document.getElementById('password').value = '';
+  const uidInput = document.getElementById('uid');
+  const pwInput = document.getElementById('password');
+  if (uidInput) uidInput.value = '';
+  if (pwInput) pwInput.value = '';
   showScreen('login-screen');
 }
 

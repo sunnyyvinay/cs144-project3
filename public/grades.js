@@ -1,22 +1,25 @@
 async function loadStudentGrades(course) {
-  const res = await fetch(`/api/students/${currentStudent.uid}/courses/${course.course_id}/grades`);
+  const res = await apiFetch(
+    `/api/students/${encodeURIComponent(currentStudent.uid)}/courses/${encodeURIComponent(course.course_id)}/grades`
+  );
   const grades = await res.json();
 
   const container = document.getElementById('modules-container');
 
-  // TODO: Data from the server should be safe to render in the page
   let rowsHtml = '';
   let totalScore = 0;
 
   for (const g of grades) {
+    const gradeId = Number(g.grade_id);
+    const score = Number(g.score);
     rowsHtml += `
           <tr>
-            <td>${g.assignment_name}</td>
-            <td>${g.score}</td>
+            <td>${escapeHtml(g.assignment_name)}</td>
+            <td>${score}</td>
             <td>100</td>
-            <input type="hidden" name="grade_${g.grade_id}" value="${g.score}">
+            <input type="hidden" name="grade_${gradeId}" value="${score}">
           </tr>`;
-    totalScore += g.score;
+    totalScore += score;
   }
 
   const finalGrade = grades.length > 0 ? (totalScore / grades.length).toFixed(1) : '0.0';
