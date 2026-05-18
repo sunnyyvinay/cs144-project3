@@ -1,16 +1,3 @@
-const SLIDES_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-  <polyline points="14 2 14 8 20 8"/>
-  <line x1="16" y1="13" x2="8" y2="13"/>
-  <line x1="16" y1="17" x2="8" y2="17"/>
-  <polyline points="10 9 9 9 8 9"/>
-</svg>`;
-
-const RECORDING_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <polygon points="23 7 16 12 23 17 23 7"/>
-  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-</svg>`;
-
 let currentCourse = null;
 
 async function loadCourse(course) {
@@ -30,13 +17,6 @@ async function loadCourse(course) {
   document.getElementById('back-to-dashboard').onclick = () => loadDashboard();
 
   showScreen('course-screen');
-}
-
-function safeUrl(url) {
-  // Reject anything that isn't a relative path, http(s), or the placeholder "#".
-  const s = String(url || '#').trim();
-  if (s === '#' || s.startsWith('/') || s.startsWith('https://') || s.startsWith('http://')) return s;
-  return '#';
 }
 
 async function loadModules(course) {
@@ -84,51 +64,11 @@ async function loadModules(course) {
     sidebarList.appendChild(li);
   });
 
+  // Module list is rendered by the React bundle in course-react.js, which
+  // exposes window.mountCourseContent. The sidebar above stays vanilla per
+  // the assignment.
   const container = document.getElementById('modules-container');
-  container.innerHTML = '';
-
-  for (const wk of weeks) {
-    const section = document.createElement('div');
-    section.className = 'module-section';
-    section.id = `week-${wk.id}`;
-
-    const sorted = wk.entries.sort((a, b) => a.sort - b.sort);
-    let entriesHtml = '';
-    for (const entry of sorted) {
-      const icon = entry.type === 'slides' ? SLIDES_ICON : RECORDING_ICON;
-      const iconClass = entry.type === 'slides' ? 'icon-slides' : 'icon-recording';
-      entriesHtml += `
-        <a href="${escapeHtml(safeUrl(entry.url))}" class="material-link">
-          <span class="material-icon ${iconClass}">${icon}</span>
-          <span>${escapeHtml(entry.title)}</span>
-        </a>
-      `;
-    }
-
-    const header = document.createElement('div');
-    header.className = 'module-header';
-    const h3 = document.createElement('h3');
-    h3.textContent = wk.title;
-    const toggle = document.createElement('span');
-    toggle.className = 'module-toggle';
-    toggle.innerHTML = '&#9660;';
-    header.append(h3, toggle);
-    header.addEventListener('click', () => toggleModule(header));
-
-    const body = document.createElement('div');
-    body.className = 'module-body';
-    body.innerHTML = `<div class="lecture-group">${entriesHtml}</div>`;
-
-    section.appendChild(header);
-    section.appendChild(body);
-    container.appendChild(section);
-  }
-}
-
-function toggleModule(header) {
-  header.classList.toggle('collapsed');
-  const body = header.nextElementSibling;
-  body.classList.toggle('collapsed');
+  window.mountCourseContent(container, weeks);
 }
 
 // Sidebar nav: Modules vs Grades
