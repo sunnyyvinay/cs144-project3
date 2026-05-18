@@ -1,0 +1,65 @@
+.dashboard-body {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.dashboard-body h2 {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+.course-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 20px;
+}
+
+.course-card {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  cursor: pointer;
+  transition: box-shadow 0.25s, transform 0.25s;
+}
+
+.course-card:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  transform: scale(1.04);
+}
+
+.course-card-img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  display: block;
+}
+
+.course-card-banner {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 32px 18px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+.card-code {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.card-instructor {
+  font-size: 14px;
+  font-weight: 400;
+  opacity: 0.9;
+}
+
+.course-color-0 .course-card-banner { background: linear-gradient(135deg, #2774AE, #1e5f8e); }
+.course-color-1 .course-card-banner { background: linear-gradient(135deg, #c0392b, #962d22); }
+.course-color-2 .course-card-banner { background: linear-gradient(135deg, #27ae60, #1e8e4e); }
+.course-color-3 .course-card-banner { background: linear-gradient(135deg, #8e44ad, #6c3483); }
+.course-color-4 .course-card-banner { background: linear-gradient(135deg, #d35400, #a04000); }

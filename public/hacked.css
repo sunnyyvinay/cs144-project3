@@ -1,0 +1,75 @@
+body.hacked-body {
+  background: #000;
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hacked-box {
+  border: 3px solid #ff0000;
+  padding: 48px 56px;
+  width: 620px;
+}
+
+@keyframes zoom-in {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.hacked-title {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 64px;
+  font-weight: 700;
+  color: #ff0000;
+  text-align: center;
+  margin-bottom: 32px;
+  text-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+  animation: zoom-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hacked-terminal {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 15px;
+  color: #00ff00;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  height: 300px;
+  margin-bottom: 48px;
+  position: relative;
+}
+
+.hacked-cursor {
+  display: inline-block;
+  width: 10px;
+  height: 17px;
+  background: #00ff00;
+  vertical-align: text-bottom;
+  animation: blink 0.7s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.hacked-btn {
+  display: block;
+  visibility: hidden;
+  margin: 36px auto 0;
+  padding: 14px 36px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: #00ff00;
+  background: transparent;
+  border: 2px solid #00ff00;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.hacked-btn:hover {
+  background: #00ff00;
+  color: #000;
+}

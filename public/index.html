@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CubHub</title>
+  <link rel="stylesheet" href="shared.css">
+  <link rel="stylesheet" href="hacked.css">
+  <link rel="stylesheet" href="login.css">
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="course.css">
+  <link rel="stylesheet" href="grades.css">
+  <link rel="stylesheet" href="professor.css">
+</head>
+<body>
+
+  <!-- Hacked Screen -->
+  <div id="hacked-screen" class="screen active">
+    <div class="hacked-box">
+      <div class="hacked-title">PWNED!</div>
+      <div id="hacked-terminal" class="hacked-terminal"></div>
+      <button id="hacked-enter-btn" class="hacked-btn">I Accept the Risk. Let Me In!</button>
+    </div>
+  </div>
+
+  <!-- Login Screen -->
+  <div id="login-screen" class="screen">
+    <div class="login-container">
+      <div class="login-logo">
+        <div class="logo-icon">B</div>
+        <h1>CubHub</h1>
+      </div>
+      <form id="login-form">
+        <label for="uid">UCLA UID</label>
+        <input type="text" id="uid" placeholder="UID or username" required>
+        <label for="password">Password</label>
+        <!-- TODO: The password should not be visible as the user types -->
+        <input type="text" id="password" placeholder="Password" required>
+        <button type="submit">Log In</button>
+        <p id="login-error" class="error hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dashboard Screen -->
+  <div id="dashboard-screen" class="screen">
+    <nav class="topbar">
+      <div class="topbar-left">
+        <div class="logo-small">B</div>
+        <span class="app-name">CubHub</span>
+      </div>
+      <div class="topbar-right">
+        <span id="user-greeting"></span>
+        <button id="logout-btn" class="btn-link">Log Out</button>
+      </div>
+    </nav>
+    <div class="dashboard-body">
+      <h2>Spring 2025</h2>
+      <div id="course-list" class="course-grid"></div>
+    </div>
+  </div>
+
+  <!-- Course Screen -->
+  <div id="course-screen" class="screen">
+    <nav class="topbar">
+      <div class="topbar-left">
+        <div class="logo-small">B</div>
+        <span class="app-name">CubHub</span>
+      </div>
+      <div class="topbar-right">
+        <span id="course-user-greeting"></span>
+        <button id="course-logout-btn" class="btn-link">Log Out</button>
+      </div>
+    </nav>
+    <div class="course-layout">
+      <aside class="course-sidebar">
+        <button id="back-to-dashboard" class="sidebar-link">&larr; Dashboard</button>
+        <h3 id="sidebar-course-code"></h3>
+        <ul class="sidebar-nav">
+          <li id="nav-modules" class="sidebar-nav-item active">Modules</li>
+          <li id="nav-grades" class="sidebar-nav-item">Grades</li>
+        </ul>
+        <ul id="sidebar-modules"></ul>
+      </aside>
+      <main class="course-main">
+        <h2 id="course-title-header"></h2>
+        <div id="modules-container"></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Professor Grades Screen -->
+  <div id="professor-grades-screen" class="screen">
+    <nav class="topbar">
+      <div class="topbar-left">
+        <div class="logo-small">B</div>
+        <span class="app-name">CubHub</span>
+      </div>
+      <div class="topbar-right">
+        <span id="prof-user-greeting"></span>
+        <button id="prof-logout-btn" class="btn-link">Log Out</button>
+      </div>
+    </nav>
+    <div class="prof-grades-body">
+      <button id="prof-back-btn" class="back-link">&larr; Back to Courses</button>
+      <h2 id="prof-course-title"></h2>
+      <div class="student-navigator">
+        <button id="prev-student" class="nav-btn">&larr; Previous</button>
+        <span id="student-indicator"></span>
+        <button id="next-student" class="nav-btn">Next &rarr;</button>
+      </div>
+      <h3 id="prof-student-name"></h3>
+      <form id="prof-grades-form">
+        <table class="grades-table">
+          <thead>
+            <tr>
+              <th>Assignment</th>
+              <th>Score</th>
+              <th>Out Of</th>
+            </tr>
+          </thead>
+          <tbody id="prof-grades-tbody"></tbody>
+          <tfoot id="prof-grades-tfoot"></tfoot>
+        </table>
+        <button type="submit" class="save-btn">Save Grades</button>
+      </form>
+      <div id="prof-save-status" class="save-status"></div>
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="hacked.js"></script>
+  <script src="login.js"></script>
+  <script src="dashboard.js"></script>
+  <script src="course.js"></script>
+  <script src="grades.js"></script>
+  <script src="professor.js"></script>
+</body>
+</html>

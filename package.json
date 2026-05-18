@@ -1,0 +1,26 @@
+{
+  "name": "project3",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:react": "npx esbuild src/CourseContent.jsx --bundle --outfile=public/course-react.js",
+    "watch:react": "npx esbuild src/CourseContent.jsx --bundle --outfile=public/course-react.js --watch",
+    "prepare-dist": "rm -rf node_modules .claude canvas.db && rm -f package-lock.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^8.5.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
