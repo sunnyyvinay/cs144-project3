@@ -139,17 +139,72 @@ const seed = db.transaction(() => {
 seed();
 
 // --- Part 1: Denormalized Tables ---
-// TODO: Create the student_courses denormalized table
+db.exec(`
+  CREATE TABLE student_courses AS
+  SELECT
+    e.login_uid     AS login_uid,
+    c.id            AS course_id,
+    c.code          AS course_code,
+    c.title         AS course_title,
+    c.instructor    AS instructor
+  FROM enrollment e
+  JOIN course c ON c.id = e.course_id;
 
-// TODO: Create the professor_courses denormalized table
+  CREATE INDEX idx_student_courses_login_uid ON student_courses(login_uid);
 
-// TODO: Create the course_content denormalized table
+  CREATE TABLE professor_courses AS
+  SELECT
+    c.professor_uid AS professor_uid,
+    c.id            AS course_id,
+    c.code          AS course_code,
+    c.title         AS course_title,
+    c.instructor    AS instructor
+  FROM course c
+  WHERE c.professor_uid IS NOT NULL;
 
-// TODO: Create the course_students denormalized table
+  CREATE INDEX idx_professor_courses_professor_uid ON professor_courses(professor_uid);
 
-// TODO: Create the student_grades denormalized table
+  CREATE TABLE course_content AS
+  SELECT
+    w.course_id     AS course_id,
+    w.id            AS week_id,
+    w.title         AS week_title,
+    w.sort_order    AS week_sort,
+    en.id           AS entry_id,
+    en.title        AS entry_title,
+    en.type         AS entry_type,
+    en.url          AS entry_url,
+    en.sort_order   AS entry_sort
+  FROM week w
+  JOIN entry en ON en.week_id = w.id;
 
-// TODO: Make searching the data in each denormalized table more efficient
+  CREATE INDEX idx_course_content_course_id ON course_content(course_id);
+
+  CREATE TABLE course_students AS
+  SELECT
+    e.course_id AS course_id,
+    l.uid       AS uid,
+    l.name      AS name
+  FROM enrollment e
+  JOIN login l ON l.uid = e.login_uid;
+
+  CREATE INDEX idx_course_students_course_id ON course_students(course_id);
+
+  CREATE TABLE student_grades AS
+  SELECT
+    g.login_uid     AS login_uid,
+    a.course_id     AS course_id,
+    g.id            AS grade_id,
+    a.id            AS assignment_id,
+    a.name          AS assignment_name,
+    g.score         AS score,
+    a.sort_order    AS sort_order
+  FROM grade g
+  JOIN assignment a ON a.id = g.assignment_id;
+
+  CREATE INDEX idx_student_grades_lookup ON student_grades(login_uid, course_id);
+  CREATE INDEX idx_student_grades_grade_id ON student_grades(grade_id);
+`);
 
 console.log('Database initialized successfully.');
 db.close();

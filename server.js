@@ -41,73 +41,55 @@ app.post('/api/login', (req, res) => {
 });
 
 // Get enrolled courses
-// TODO: Query the student_courses denormalized table instead
 // TODO: Students should only be able to see their own courses
 app.get('/api/students/:uid/courses', (req, res) => {
   const rows = db.prepare(`
-    SELECT c.id AS course_id, c.code AS course_code, c.title AS course_title, c.instructor
-    FROM enrollment e
-    JOIN course c ON c.id = e.course_id
-    WHERE e.login_uid = ?
+    SELECT course_id, course_code, course_title, instructor
+    FROM student_courses
+    WHERE login_uid = ?
   `).all(req.params.uid);
   res.json(rows);
 });
 
 // Get course content
-// TODO: Query the course_content denormalized table instead
 app.get('/api/courses/:courseId/content', (req, res) => {
   const rows = db.prepare(`
-    SELECT
-      w.id AS week_id,
-      w.title AS week_title,
-      w.sort_order AS week_sort,
-      e.id AS entry_id,
-      e.title AS entry_title,
-      e.type AS entry_type,
-      e.url AS entry_url,
-      e.sort_order AS entry_sort
-    FROM week w
-    JOIN entry e ON e.week_id = w.id
-    WHERE w.course_id = ?
-    ORDER BY w.sort_order, e.sort_order
+    SELECT week_id, week_title, week_sort, entry_id, entry_title, entry_type, entry_url, entry_sort
+    FROM course_content
+    WHERE course_id = ?
   `).all(req.params.courseId);
   res.json(rows);
 });
 
 // Get courses taught by a professor
-// TODO: Query the professor_courses denormalized table instead
 app.get('/api/professors/:uid/courses', (req, res) => {
   const rows = db.prepare(`
-    SELECT c.id AS course_id, c.code AS course_code, c.title AS course_title, c.instructor
-    FROM course c
-    WHERE c.professor_uid = ?
+    SELECT course_id, course_code, course_title, instructor
+    FROM professor_courses
+    WHERE professor_uid = ?
   `).all(req.params.uid);
   res.json(rows);
 });
 
 // Get enrolled students for a course
-// TODO: Query the course_students denormalized table instead
 app.get('/api/courses/:courseId/students', (req, res) => {
   const rows = db.prepare(`
-    SELECT l.uid, l.name
-    FROM enrollment e
-    JOIN login l ON l.uid = e.login_uid
-    WHERE e.course_id = ?
-    ORDER BY l.name
+    SELECT uid, name
+    FROM course_students
+    WHERE course_id = ?
+    ORDER BY name
   `).all(req.params.courseId);
   res.json(rows);
 });
 
 // Get grades for a student in a course
-// TODO: Query the student_grades denormalized table instead
 // TODO: Students should only be able to see their own grades
 app.get('/api/students/:uid/courses/:courseId/grades', (req, res) => {
   const rows = db.prepare(`
-    SELECT g.id AS grade_id, a.id AS assignment_id, a.name AS assignment_name, g.score
-    FROM grade g
-    JOIN assignment a ON a.id = g.assignment_id
-    WHERE g.login_uid = ? AND a.course_id = ?
-    ORDER BY a.sort_order
+    SELECT grade_id, assignment_id, assignment_name, score
+    FROM student_grades
+    WHERE login_uid = ? AND course_id = ?
+    ORDER BY sort_order
   `).all(req.params.uid, req.params.courseId);
   res.json(rows);
 });
@@ -126,14 +108,15 @@ app.get('/api/search', (req, res) => {
 });
 
 // Update grades
-// TODO: Also update the corresponding denormalized table
 // TODO: Only a professor should be able to change grades
 app.post('/api/grades', (req, res) => {
   const { grades } = req.body;
-  const update = db.prepare('UPDATE grade SET score = ? WHERE id = ?');
+  const updateNormalized = db.prepare('UPDATE grade SET score = ? WHERE id = ?');
+  const updateDenormalized = db.prepare('UPDATE student_grades SET score = ? WHERE grade_id = ?');
   const tx = db.transaction(() => {
     for (const g of grades) {
-      update.run(g.score, g.grade_id);
+      updateNormalized.run(g.score, g.grade_id);
+      updateDenormalized.run(g.score, g.grade_id);
     }
   });
   tx();
