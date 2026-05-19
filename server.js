@@ -28,10 +28,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// CORS: only allow same-origin requests. Browsers don't actually need CORS
-// headers for same-origin requests, so we send the headers narrowly and never
-// set Access-Control-Allow-Origin: *. Combined with SameSite cookies and the
-// origin check below, this blocks cross-site requests cold.
+// CORS: only allow same-origin requests
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin === ORIGIN) {
@@ -44,9 +41,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Security headers — most importantly CSP, which blocks inline <script> and
-// only allows scripts from our own origin. This is defense-in-depth against
-// any XSS we missed when escaping on the client.
+// Security headers (CSP)
 app.use((req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
@@ -69,9 +64,7 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// CSRF defense for state-changing requests: same-site cookies aren't enough
-// on their own (some old browsers, edge cases), so we also reject any
-// non-GET request whose Origin header isn't our own.
+// CSRF defense for state-changing requests
 function requireSameOrigin(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD') return next();
   const origin = req.headers.origin || req.headers.referer || '';
@@ -118,15 +111,13 @@ function requireProfessor(req, res, next) {
   next();
 }
 
-// Login — parameterized query, bcrypt password comparison, sets HttpOnly cookie.
+// Login
 app.post('/api/login', (req, res) => {
   const { uid, password } = req.body || {};
   if (typeof uid !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: 'Invalid request' });
   }
   const row = db.prepare('SELECT uid, name, role, password FROM login WHERE uid = ?').get(uid);
-  // Compare against a dummy hash when the user doesn't exist, so timing is
-  // identical to a wrong-password case. This keeps the response uniform.
   const hash = row ? row.password : '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi';
   const ok = bcrypt.compareSync(password, hash);
   if (!row || !ok) {
