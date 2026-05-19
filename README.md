@@ -1,3 +1,8 @@
+**Academic Integrity Policy:**
+- **You may use AI to help understand the requirements for this project.**
+- **You may use AI to write code for Responsive Web Design, Part 4.**
+- **You may not use AI anywhere else.**
+
 # Project 3: CubHub
 
 CubHub is a simplified course management system built with Express and SQLite. The database is recreated each time the server starts — `server.js` deletes the database file and runs `init_db.js` to rebuild the schema and seed data from scratch.

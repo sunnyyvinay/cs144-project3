@@ -9,8 +9,10 @@ body.hacked-body {
 
 .hacked-box {
   border: 3px solid #ff0000;
-  padding: 48px 56px;
-  width: 620px;
+  padding: clamp(1.5rem, 5vw, 3rem) clamp(1.5rem, 5vw, 3.5rem);
+  /* min() so the box can never be wider than ~92% of the viewport — the
+     original fixed 620px would overflow on any phone. */
+  width: min(38.75rem, 92vw);
 }
 
 @keyframes zoom-in {
@@ -20,23 +22,27 @@ body.hacked-body {
 
 .hacked-title {
   font-family: 'Courier New', Courier, monospace;
-  font-size: 64px;
+  /* clamp lets the title shrink on a phone while staying impressively large
+     on a desktop. */
+  font-size: clamp(2rem, 9vw, 4rem);
   font-weight: 700;
   color: #ff0000;
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 2rem;
   text-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
   animation: zoom-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .hacked-terminal {
   font-family: 'Courier New', Courier, monospace;
-  font-size: 15px;
+  font-size: clamp(0.8125rem, 2.4vw, 0.9375rem);
   color: #00ff00;
   line-height: 1.7;
   white-space: pre-wrap;
-  height: 300px;
-  margin-bottom: 48px;
+  /* Was a fixed 300px; that would overflow short phone screens in landscape
+     and clip on small portraits. Bound it to viewport height. */
+  height: clamp(11.25rem, 40vh, 20rem);
+  margin-bottom: 3rem;
   position: relative;
 }
 
@@ -57,10 +63,10 @@ body.hacked-body {
 .hacked-btn {
   display: block;
   visibility: hidden;
-  margin: 36px auto 0;
-  padding: 14px 36px;
+  margin: 2.25rem auto 0;
+  padding: 0.875rem 2.25rem;
   font-family: 'Courier New', Courier, monospace;
-  font-size: 18px;
+  font-size: clamp(0.9375rem, 2.5vw, 1.125rem);
   font-weight: 700;
   color: #00ff00;
   background: transparent;
@@ -72,4 +78,17 @@ body.hacked-body {
 .hacked-btn:hover {
   background: #00ff00;
   color: #000;
+}
+
+/* Phone: tighter spacing inside the already-shrunk box. */
+@media (max-width: 600px) {
+  .hacked-title {
+    margin-bottom: 1.25rem;
+  }
+  .hacked-terminal {
+    margin-bottom: 1.5rem;
+  }
+  .hacked-btn {
+    padding: 0.75rem 1.5rem;
+  }
 }
